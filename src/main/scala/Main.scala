@@ -6,17 +6,19 @@ import org.apache.spark.sql.functions.{avg, col, count, max, min, to_date, udf}
 
 import java.sql.Date
 import scala.util.{Failure, Success, Try}
+
 object Main {
 
   def prepareDataForAdditionalTask(dataFrame: DataFrame): DataFrame = {
-    def Round : Double => Long = { x => scala.math.round(x)}
+    def Round: Double => Long = { x => scala.math.round(x) }
+
     val round = udf(Round)
     val withRoundedDist = dataFrame.withColumn("Trip_distance_rounded", round(col("Trip_distance")))
     withRoundedDist.groupBy("Trip_distance_rounded").agg(avg("Tip_amount"), count("Tip_amount")).toDF("dist", "tip", "trip_count")
       .filter(col("dist") > 0 && col("trip_count") >= 20).sort("dist").drop(col("trip_count"))
   }
 
-  def createParquet(spark: SparkSession, dataSetTemplate : String): Unit = {
+  def createParquet(spark: SparkSession, dataSetTemplate: String): Unit = {
     val schema = new StructType()
       .add("VendorID", IntegerType, nullable = true)
       .add("tpep_pickup_datetime", TimestampType, nullable = true)
@@ -40,17 +42,14 @@ object Main {
     df.write.mode("overwrite").parquet(s"../$dataSetTemplate.parquet")
   }
 
-  def loadDataFrame(spark: SparkSession, dataSetTemplate : String) : DataFrame = {
-    val res  = Try(spark.read.parquet(s"../$dataSetTemplate.parquet"))
+  def loadDataFrame(spark: SparkSession, dataSetTemplate: String): DataFrame = {
+    val res = Try(spark.read.parquet(s"../$dataSetTemplate.parquet"))
     res match {
       case Success(answer) => return answer
       case Failure(_) => createParquet(spark, dataSetTemplate)
     }
     spark.read.parquet(s"../$dataSetTemplate.parquet")
   }
-
-  // 23:02:42
-  // 23:07:41
 
   def main(args: Array[String]): Unit = {
     val sparkConf = new SparkConf()
@@ -65,14 +64,14 @@ object Main {
 
     // сохраняем данные для дополнительноно задания
     prepareDataForAdditionalTask(df).write.options(
-      Map("header"->"true", "delimiter"->",")).mode("overwrite").csv("../dist_and_trip.csv")
+      Map("header" -> "true", "delimiter" -> ",")).mode("overwrite").csv("../dist_and_trip.csv")
 
     // добавлям столбец с датой поездки (без времени, что бы было удобно обрабатывать)
     val withDate = df.withColumn("pickup_date", to_date(col("tpep_pickup_datetime")))
 
     // достаём данные по всем 4м группам
 
-    def getGroupData(column: Column) : DataFrame = {
+    def getGroupData(column: Column): DataFrame = {
       withDate.filter(column).groupBy(col("pickup_date"))
         .agg(min("total_amount"), max("total_amount"), count("total_amount"))
         .toDF("date", "cheapest", "dearest", "total_trip")
@@ -110,48 +109,47 @@ object Main {
     // создаём пустую таблицу
     var parquetDf = spark.createDataFrame(sc.emptyRDD[Row], parquetSchema)
 
-    // функция-помощник для получения общих данных для каждой группы пассажиров
-    def getCommonData(dataFrame: DataFrame) :  (Double, Double, Long) = {
-      if (dataFrame.count() == 0) {
-         (0, 0, 0)
-      } else {
-        val first = dataFrame.first()
-         (first.getAs[Double](1), first.getAs[Double](2), first.getAs[Long](3))
-      }
-    }
-
     // пробегаемся по всем датам и наполняем выходную таблицу
     for (elem <- dates.collect()) {
       val date = elem.getAs[Date](0)
-      val p0d = p0.filter(col("date") === date)
-      val p1d = p1.filter(col("date") === date)
-      val p2d = p2.filter(col("date") === date)
-      val p3d = p3.filter(col("date") === date)
-      val p4d = p4.filter(col("date") === date)
 
-      val (p0min, p0max, p0Total) = getCommonData(p0d)
-      val (p1min, p1max, p1Total) = getCommonData(p1d)
-      val (p2min, p2max, p2Total) = getCommonData(p2d)
-      val (p3min, p3max, p3Total) = getCommonData(p3d)
-      val (p4min, p4max, p4Total) = getCommonData(p4d)
+      // функция-помощник для получения общих данных для каждой группы пассажиров
+      def getCommonData(df: DataFrame): (Double, Double, Long) = {
+        val dataFrame = df.filter(col("date") === date)
+        if (dataFrame.count() == 0) {
+          (0, 0, 0)
+        } else {
+          val first = dataFrame.first()
+          (first.getAs[Double](1), first.getAs[Double](2), first.getAs[Long](3))
+        }
+      }
+
+      val (p0min, p0max, p0Total) = getCommonData(p0)
+      val (p1min, p1max, p1Total) = getCommonData(p1)
+      val (p2min, p2max, p2Total) = getCommonData(p2)
+      val (p3min, p3max, p3Total) = getCommonData(p3)
+      val (p4min, p4max, p4Total) = getCommonData(p4)
       val total = p0Total + p1Total + p2Total + p3Total + p4Total
       val onePercent = total.toDouble / 100
-      def correct(value: Double): Double = {if (value ==0 ) 0 else value / onePercent}
+
+      def correct(value: Double): Double = {
+        if (value == 0) 0 else value / onePercent
+      }
+
       val p0Percent = correct(p0Total)
       val p1Percent = correct(p1Total)
       val p2Percent = correct(p2Total)
       val p3Percent = correct(p3Total)
       val p4Percent = correct(p4Total)
-      val tmpSeq = Seq(
-        (date,
-          p0Percent, p0min, p0max,
-          p1Percent, p1min, p1max,
-          p2Percent, p2min, p2max,
-          p3Percent, p3min, p3max,
-          p4Percent, p4min, p4max)
-      )
-      val tmpDf = spark.createDataFrame(tmpSeq)
-      parquetDf = parquetDf.union(tmpDf)
+      parquetDf = parquetDf.union(
+        spark.createDataFrame(Seq(
+          (date,
+            p0Percent, p0min, p0max,
+            p1Percent, p1min, p1max,
+            p2Percent, p2min, p2max,
+            p3Percent, p3min, p3max,
+            p4Percent, p4min, p4max)
+        )))
     }
 
     // пишем таблицу на диск
