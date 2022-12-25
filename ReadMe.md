@@ -41,7 +41,7 @@
 описывающий зависимость количества чаевых от пройденного расстояния. Jupyter notebook, рисующий график и вычисляющий
 коофициэнты линейной функции можно найти в папке ./python
 
-![](.\images\dist_and_tip.png)
+![](https://github.com/KurlesHS/de-attestation/blob/master/images/dist_and_tip.png?raw=true)
 
 
 
