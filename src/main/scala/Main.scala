@@ -59,11 +59,9 @@ object Main {
     val sc = new SparkContext(sparkConf)
     val spark = SparkSession.builder.appName("Task 3.3").getOrCreate()
 
-
-
     // загружаем датасет, при необходимости конвертируем в parquet
-    // val df = loadDataFrame(spark, "yellow_tripdata_2020-01")
-    val df = loadDataFrame(spark, "small")
+    val df = loadDataFrame(spark, "yellow_tripdata_2020-01")
+    // val df = loadDataFrame(spark, "small")
 
     // сохраняем данные для дополнительноно задания
     prepareDataForAdditionalTask(df).write.options(
@@ -158,6 +156,5 @@ object Main {
 
     // пишем таблицу на диск
     parquetDf.write.mode("overwrite").parquet("../result.parquet")
-    parquetDf.show(2000)
   }
 }
