@@ -1,12 +1,11 @@
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{Column, DataFrame, Row, SparkSession}
 import org.apache.spark.sql.types.{DateType, DoubleType, IntegerType, StringType, StructType, TimestampType}
-import org.apache.spark.sql.{DataFrame, Row}
-import org.apache.spark.sql.functions.{col, count, max, min, avg, to_date, udf}
+import org.apache.spark.sql.functions.{avg, col, count, max, min, to_date, udf}
 
 import java.sql.Date
-import scala.util.{Try, Success, Failure}
+import scala.util.{Failure, Success, Try}
 object Main {
 
   def prepareDataForAdditionalTask(dataFrame: DataFrame): DataFrame = {
@@ -60,10 +59,11 @@ object Main {
     val sc = new SparkContext(sparkConf)
     val spark = SparkSession.builder.appName("Task 3.3").getOrCreate()
 
-    // val df = loadDataFrame(spark, "small")
+
 
     // загружаем датасет, при необходимости конвертируем в parquet
-    val df = loadDataFrame(spark, "yellow_tripdata_2020-01")
+    // val df = loadDataFrame(spark, "yellow_tripdata_2020-01")
+    val df = loadDataFrame(spark, "small")
 
     // сохраняем данные для дополнительноно задания
     prepareDataForAdditionalTask(df).write.options(
@@ -73,25 +73,18 @@ object Main {
     val withDate = df.withColumn("pickup_date", to_date(col("tpep_pickup_datetime")))
 
     // достаём данные по всем 4м группам
-    val p0 = withDate.filter(withDate("passenger_count") === 0).groupBy(col("pickup_date"))
-      .agg(min("total_amount"), max("total_amount"), count("total_amount"))
-      .toDF("date", "cheapest", "dearest", "total_trip")
 
-    val p1 = withDate.filter(withDate("passenger_count") === 1).groupBy(col("pickup_date"))
-      .agg(min("total_amount"), max("total_amount"), count("total_amount"))
-      .toDF("date", "cheapest", "dearest", "total_trip")
+    def getGroupData(column: Column) : DataFrame = {
+      withDate.filter(column).groupBy(col("pickup_date"))
+        .agg(min("total_amount"), max("total_amount"), count("total_amount"))
+        .toDF("date", "cheapest", "dearest", "total_trip")
+    }
 
-    val p2 = withDate.filter(withDate("passenger_count") === 2).groupBy(col("pickup_date"))
-      .agg(min("total_amount"), max("total_amount"), count("total_amount"))
-      .toDF("date", "cheapest", "dearest", "total_trip")
-
-    val p3 = withDate.filter(withDate("passenger_count") === 3).groupBy(col("pickup_date"))
-      .agg(min("total_amount"), max("total_amount"), count("total_amount"))
-      .toDF("date", "cheapest", "dearest", "total_trip")
-
-    val p4 = withDate.filter(withDate("passenger_count") > 3).groupBy(col("pickup_date"))
-      .agg(min("total_amount"), max("total_amount"), count("total_amount"))
-      .toDF("date", "cheapest", "dearest", "total_trip")
+    val p0 = getGroupData(withDate("passenger_count") === 0)
+    val p1 = getGroupData(withDate("passenger_count") === 1)
+    val p2 = getGroupData(withDate("passenger_count") === 2)
+    val p3 = getGroupData(withDate("passenger_count") === 3)
+    val p4 = getGroupData(withDate("passenger_count") > 3)
 
     // достаём все даты поездок
     val dates = withDate.select("pickup_date")
@@ -119,8 +112,8 @@ object Main {
     // создаём пустую таблицу
     var parquetDf = spark.createDataFrame(sc.emptyRDD[Row], parquetSchema)
 
-    // функция-помощник для получения общих данныд для каждой группы пассажиров
-    def helper(dataFrame: DataFrame) :  (Double, Double, Long) = {
+    // функция-помощник для получения общих данных для каждой группы пассажиров
+    def getCommonData(dataFrame: DataFrame) :  (Double, Double, Long) = {
       if (dataFrame.count() == 0) {
          (0, 0, 0)
       } else {
@@ -129,7 +122,7 @@ object Main {
       }
     }
 
-    // пробегаемся по всем датам и создаём выходную таблицу
+    // пробегаемся по всем датам и наполняем выходную таблицу
     for (elem <- dates.collect()) {
       val date = elem.getAs[Date](0)
       val p0d = p0.filter(col("date") === date)
@@ -138,19 +131,19 @@ object Main {
       val p3d = p3.filter(col("date") === date)
       val p4d = p4.filter(col("date") === date)
 
-      val (p0min, p0max, p0Total) = helper(p0d)
-      val (p1min, p1max, p1Total) = helper(p1d)
-      val (p2min, p2max, p2Total) = helper(p2d)
-      val (p3min, p3max, p3Total) = helper(p3d)
-      val (p4min, p4max, p4Total) = helper(p4d)
+      val (p0min, p0max, p0Total) = getCommonData(p0d)
+      val (p1min, p1max, p1Total) = getCommonData(p1d)
+      val (p2min, p2max, p2Total) = getCommonData(p2d)
+      val (p3min, p3max, p3Total) = getCommonData(p3d)
+      val (p4min, p4max, p4Total) = getCommonData(p4d)
       val total = p0Total + p1Total + p2Total + p3Total + p4Total
       val onePercent = total.toDouble / 100
-      def helper2(value: Double): Double = {if (value ==0 ) 0 else value / onePercent}
-      val p0Percent = helper2(p0Total)
-      val p1Percent = helper2(p1Total)
-      val p2Percent = helper2(p2Total)
-      val p3Percent = helper2(p3Total)
-      val p4Percent = helper2(p4Total)
+      def correct(value: Double): Double = {if (value ==0 ) 0 else value / onePercent}
+      val p0Percent = correct(p0Total)
+      val p1Percent = correct(p1Total)
+      val p2Percent = correct(p2Total)
+      val p3Percent = correct(p3Total)
+      val p4Percent = correct(p4Total)
       val tmpSeq = Seq(
         (date,
           p0Percent, p0min, p0max,
@@ -165,5 +158,6 @@ object Main {
 
     // пишем таблицу на диск
     parquetDf.write.mode("overwrite").parquet("../result.parquet")
+    parquetDf.show(2000)
   }
 }
