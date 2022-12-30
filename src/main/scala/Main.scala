@@ -154,5 +154,6 @@ object Main {
 
     // пишем таблицу на диск
     parquetDf.write.mode("overwrite").parquet("../result.parquet")
+    println("result len: 0" + parquetDf.count())
   }
 }
